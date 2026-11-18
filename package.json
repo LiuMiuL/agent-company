@@ -24,7 +24,12 @@
     "intake": "bash scripts/intake.sh",
     "context": "bash scripts/load-context.sh",
     "memory:new": "bash scripts/memory-new.sh",
-    "clean": "rm -rf node_modules apps/*/node_modules apps/*/.next packages/*/node_modules .turbo"
+    "clean": "rm -rf node_modules apps/*/node_modules apps/*/.next packages/*/node_modules .turbo",
+    "dev:web": "turbo run dev --filter=@repo/web",
+    "dev:admin": "turbo run dev --filter=@repo/admin",
+    "audit:content": "node --experimental-strip-types --no-warnings scripts/audit.ts",
+    "cover": "node scripts/set-cover.mjs",
+    "imagegen": "bash scripts/codex-imagegen.sh"
   },
   "devDependencies": {
     "turbo": "^2.10.7",

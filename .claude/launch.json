@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "blog-dev",
+      "runtimeExecutable": "C:\\Users\\admin\\AppData\\Local\\Programs\\Git\\bin\\bash.exe",
+      "runtimeArgs": ["-c", "pnpm dev"],
+      "port": 3000
+    }
+  ]
+}
