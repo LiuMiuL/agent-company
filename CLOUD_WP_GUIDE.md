@@ -94,7 +94,7 @@ GitHub Actions 에서 **글을 만들고 `manyinfo.net` 워드프레스에 올�
 
 ```bash
 cp .env.example .env          # 값 채우기 (커밋 금지)
-pnpm wp:test                  # 순수 함수 테스트 (네트워크 없음)
+pnpm wp:test                  # 단위 + 모의 서버 E2E 테스트 (네트워크 없음)
 
 # .env 를 읽어서 미리보기 (워드프레스에 쓰지 않음)
 DRY_RUN=true pnpm wp:publish:env

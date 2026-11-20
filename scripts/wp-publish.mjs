@@ -86,6 +86,9 @@ export function readConfig(env = process.env) {
     openaiKey: e('OPENAI_API_KEY'),
     anthropicModel: e('ANTHROPIC_MODEL', DEFAULT_ANTHROPIC_MODEL),
     openaiModel: e('OPENAI_MODEL', DEFAULT_OPENAI_MODEL),
+    // 테스트·프록시용. 비워 두면 실제 API 주소를 쓴다.
+    anthropicBaseUrl: e('ANTHROPIC_BASE_URL', 'https://api.anthropic.com').replace(/\/+$/, ''),
+    openaiBaseUrl: e('OPENAI_BASE_URL', 'https://api.openai.com').replace(/\/+$/, ''),
     topic: e('TOPIC'),
     // 워크플로우 select 의 '지정 안 함' 항목은 빈 값과 같게 취급한다.
     category: e('CATEGORY').replace(/^지정\s*안\s*함.*$/, ''),
@@ -655,7 +658,7 @@ async function callAnthropic(cfg, prompt) {
   let lastError;
   for (const model of models) {
     const res = await fetchWithTimeout(
-      'https://api.anthropic.com/v1/messages',
+      `${cfg.anthropicBaseUrl}/v1/messages`,
       {
         method: 'POST',
         headers: {
@@ -708,7 +711,7 @@ async function callOpenAI(cfg, prompt) {
     if (modern) body.response_format = { type: 'json_object' };
     // 추론 계열은 temperature 를 거부하므로 아예 보내지 않는다.
     const res = await fetchWithTimeout(
-      'https://api.openai.com/v1/chat/completions',
+      `${cfg.openaiBaseUrl}/v1/chat/completions`,
       {
         method: 'POST',
         headers: {
@@ -983,7 +986,7 @@ async function requestOpenAIImage(cfg, prompt) {
   }
 
   const res = await fetchWithTimeout(
-    'https://api.openai.com/v1/images/generations',
+    `${cfg.openaiBaseUrl}/v1/images/generations`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.openaiKey}` },

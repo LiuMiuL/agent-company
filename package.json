@@ -33,7 +33,7 @@
     "wp:publish": "node scripts/wp-publish.mjs",
     "wp:publish:env": "node --env-file=.env scripts/wp-publish.mjs",
     "wp:publish:dry": "DRY_RUN=true node scripts/wp-publish.mjs",
-    "wp:test": "node --test scripts/wp-publish.test.mjs"
+    "wp:test": "node --test scripts/wp-publish.test.mjs scripts/wp-publish.e2e.test.mjs"
   },
   "devDependencies": {
     "turbo": "^2.10.7",
