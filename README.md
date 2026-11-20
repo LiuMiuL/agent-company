@@ -240,6 +240,10 @@ Codex 를 쓸 수 없으면 이 순서로 폴백합니다.
 
 근거: [ADR-0002](./wiki/decisions/ADR-0002-codex-only-image-generation.md)
 
+> 클라우드 워드프레스 발행(`scripts/wp-publish.mjs`)은 이 정책 밖의 별도 경로입니다.
+> 대문 이미지만 OpenAI Images 로 만들고, 로컬 편집국의 Codex 전용 규칙은 그대로입니다.
+> 경계: [ADR-0004](./wiki/decisions/ADR-0004-cloud-wordpress-publishing.md)
+
 ### 5. 인계
 
 다른 워크스페이스에서 만들던 것을 들여옵니다. 기존 서비스를 미니앱으로 옮기거나, 디자인
@@ -263,6 +267,17 @@ zip · tar.gz · 폴더를 `inbox/<이름>/` 에 풀고, `node_modules` 같은 �
 `inbox/` 는 버전 관리하지 않습니다. **재료이지 결과물이 아니기 때문입니다** — 여기서 뽑아낸
 명세와 에셋만 저장소에 남습니다 (코어 하드 룰 3).
 
+### 6. 클라우드 발행
+
+PC 가 꺼져 있어도 글을 만들어 워드프레스(`manyinfo.net`)에 임시저장하는 경로가 있습니다.
+에이전트 로스터 밖의 자동화이고, 저장소 콘텐츠(`content/posts/`)는 읽지도 쓰지도 않습니다.
+
+- 스크립트: `scripts/wp-publish.mjs` — LLM 글 생성 → HTML 정리 → 카테고리 매칭 → (선택) 대문 이미지 → `draft`
+- 워크플로우: `.github/workflows/wp-publish.yml` (**WP Auto Publish**)
+- 기본값은 `draft`. `publish` 는 사람이 실행 화면에서 고를 때만 일어납니다.
+- 설정·실행법: [CLOUD_WP_GUIDE.md](./CLOUD_WP_GUIDE.md)
+- 경계와 이유: [ADR-0004](./wiki/decisions/ADR-0004-cloud-wordpress-publishing.md)
+
 ---
 
 ## 코어 하드 룰
@@ -274,6 +289,11 @@ zip · tar.gz · 폴더를 `inbox/<이름>/` 에 풀고, `node_modules` 같은 �
 3. **진실은 저장소 파일이다.** 결과물도 결정도 코드와 같은 저장소에서 버전 관리한다.
 4. **게이트는 결정적이다.** 검수에 모델 추론을 넣지 않는다.
 5. **컨텍스트는 스스로 올라온다.** 누구도 챙겨올 필요가 없다.
+
+> 클라우드 워드프레스 발행(`scripts/wp-publish.mjs`)은 이 규칙 밖의 **별도 경로**입니다.
+> 기본 `draft`, 사람이 고를 때만 `publish`, 대문 이미지는 OpenAI Images 한 가지,
+> 저장소 콘텐츠는 읽지도 쓰지도 않습니다. 범위와 이유는
+> [ADR-0004](./wiki/decisions/ADR-0004-cloud-wordpress-publishing.md) 에 있습니다.
 
 도메인 규칙은 `templates/<id>/template.yaml` 의 `rule:` 에 적고, 세션 시작 시 코어 룰 위에
 얹혀서 주입됩니다.
@@ -294,6 +314,7 @@ zip · tar.gz · 폴더를 `inbox/<이름>/` 에 풀고, `node_modules` 같은 �
 | `pnpm context` | 세션 컨텍스트 수동 출력 |
 | `pnpm memory:new <topic>` | 새 메모리 파일 생성 (`--long` 으로 장기) |
 | `pnpm dev \| build \| typecheck \| lint \| test` | 워크스페이스 전체 (turbo) |
+| `pnpm wp:publish` · `pnpm wp:test` | 클라우드 워드프레스 발행(기본 `draft`) · 발행 스크립트 테스트 — [안내](./CLOUD_WP_GUIDE.md) |
 
 ### 템플릿이 얹는 것
 

@@ -18,6 +18,15 @@
 
 version: 2
 
+# ── 클라우드 워드프레스 발행 (로스터 밖) ───────────────────────
+# `scripts/wp-publish.mjs` + `.github/workflows/wp-publish.yml` 은 에이전트가 아니라
+# **사람이 실행하는 클라우드 자동화**입니다. 그래서 이 로스터에 올리지 않습니다.
+#   · 기본값 `draft` — `publish` 는 사람이 워크플로우 화면에서 고를 때만
+#   · 대문 이미지만 OpenAI Images — 로컬 `image-maker` 의 Codex 전용 규칙은 그대로
+#   · 저장소 `content/posts/` 는 읽지도 쓰지도 않음
+# 경계와 이유: wiki/decisions/ADR-0004-cloud-wordpress-publishing.md
+# 사용법: CLOUD_WP_GUIDE.md
+
 agents:
   - id: blog-writer
     name: Blog Writer

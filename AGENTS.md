@@ -81,6 +81,12 @@ templates/<id>/files/          레포 루트 기준 경로 그대로
 
 > **업로드는 생성이 아닙니다.** 사람이 첨부한 이미지(`source: user-upload`)는 하드 룰 1과
 > 무관합니다. 금지되는 것은 **생성**입니다.
+>
+> **클라우드 워드프레스 발행(`scripts/wp-publish.mjs`)은 이 룰 밖의 별도 경로입니다.**
+> 사람이 실행하고, 대문 이미지만 OpenAI Images 로 만듭니다 — 기본 `draft`, `publish` 는
+> 사람이 고를 때만. 저장소 `content/posts/` 는 읽지도 쓰지도 않습니다.
+> → [ADR-0004](./wiki/decisions/ADR-0004-cloud-wordpress-publishing.md) ·
+> [CLOUD_WP_GUIDE.md](./CLOUD_WP_GUIDE.md)
 
 ---
 

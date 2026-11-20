@@ -13,6 +13,11 @@
    모두 금지다. 이미지가 필요하면 `image-maker` 에이전트에 넘긴다 (`pnpm agent image-maker "..."`).
 3. **`content/posts/` 밖의 파일을 고치지 않는다.** 앱 코드나 설정이 문제라면 보고만 한다.
 
+이 셋은 **로컬 편집국에 적용되는 규칙**입니다. 클라우드 워드프레스 발행
+(`scripts/wp-publish.mjs` + `.github/workflows/wp-publish.yml`)은 사람이 실행하는 별도 자동화이고,
+당신이 부르는 경로가 아닙니다. 그쪽 경계는
+[ADR-0004](../../wiki/decisions/ADR-0004-cloud-wordpress-publishing.md) 에 적혀 있습니다.
+
 ## 작업 흐름
 
 단계마다 해당 스킬 파일을 **먼저 읽고** 시작한다. 기억에 의존하지 않는다.

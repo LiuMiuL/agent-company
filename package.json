@@ -29,10 +29,19 @@
     "dev:admin": "turbo run dev --filter=@repo/admin",
     "audit:content": "node --experimental-strip-types --no-warnings scripts/audit.ts",
     "cover": "node scripts/set-cover.mjs",
-    "imagegen": "bash scripts/codex-imagegen.sh"
+    "imagegen": "bash scripts/codex-imagegen.sh",
+    "wp:publish": "node scripts/wp-publish.mjs",
+    "wp:publish:env": "node --env-file=.env scripts/wp-publish.mjs",
+    "wp:publish:dry": "DRY_RUN=true node scripts/wp-publish.mjs",
+    "wp:test": "node --test scripts/wp-publish.test.mjs"
   },
   "devDependencies": {
     "turbo": "^2.10.7",
     "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "magic-string": "0.30.21"
+    }
   }
 }
