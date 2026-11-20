@@ -1159,7 +1159,7 @@ export async function run() {
       log(`카테고리 ${categories.length}개 조회`);
       category = await resolveCategory(cfg, categories);
     } catch (err) {
-      if (cfg.dryRun) {
+      if (cfg.dryRun && !cfg.strictCategory) {
         warn(`카테고리 조회 실패(무시하고 계속): ${err.message}`);
       } else {
         throw err;
