@@ -95,9 +95,17 @@ GitHub Actions 에서 **글을 만들고 `manyinfo.net` 워드프레스에 올�
 ```bash
 cp .env.example .env          # 값 채우기 (커밋 금지)
 pnpm wp:test                  # 순수 함수 테스트 (네트워크 없음)
-pnpm wp:publish:dry           # DRY_RUN=true — 워드프레스에 쓰지 않음
-pnpm wp:publish:env           # .env 를 읽어 실제 실행 (draft 권장)
+
+# .env 를 읽어서 미리보기 (워드프레스에 쓰지 않음)
+DRY_RUN=true pnpm wp:publish:env
+
+# .env 를 읽어서 실제 실행 (draft 권장)
+pnpm wp:publish:env
 ```
+
+> `pnpm wp:publish` 는 셸에 export 된 환경변수만 읽습니다. `.env` 파일을 쓰려면
+> `pnpm wp:publish:env` 를 쓰세요. `pnpm wp:publish:dry` 는 `DRY_RUN=true` 만 붙인
+> 짧은 명령입니다(환경변수는 미리 export).
 
 LLM 키 없이 파이프라인만 확인하려면 예시 글을 넣습니다.
 
