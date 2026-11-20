@@ -172,15 +172,16 @@ function runPublisher(port, extraEnv = {}) {
     LLM_PROVIDER: 'anthropic',
     TOPIC: '테스트 주제',
     CATEGORY: '할인정보',
-    POST_STATUS: 'draft',
+    // 워크플로우 푸시 경로와 같이 비워 두면 JSON 의 status 를 따른다.
+    POST_STATUS: '',
     GENERATE_IMAGE: 'true',
     DRY_RUN: 'false',
     OUTPUT_DIR: outDir,
     ...extraEnv,
   };
-  // 실제 키가 섞여 들어가지 않게 테스트 값을 덮어쓴다.
-  env.ANTHROPIC_API_KEY = extraEnv.ANTHROPIC_API_KEY ?? 'test-anthropic-key';
-  env.OPENAI_API_KEY = extraEnv.OPENAI_API_KEY ?? 'test-openai-key';
+  // 실제 키가 섞여 들어가지 않게 테스트 값을 덮어쓴다. 빈 문자열은 "키 없음"으로 존중한다.
+  env.ANTHROPIC_API_KEY = 'ANTHROPIC_API_KEY' in extraEnv ? extraEnv.ANTHROPIC_API_KEY : 'test-anthropic-key';
+  env.OPENAI_API_KEY = 'OPENAI_API_KEY' in extraEnv ? extraEnv.OPENAI_API_KEY : 'test-openai-key';
 
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(ROOT, 'scripts/wp-publish.mjs')], { cwd: ROOT, env });
@@ -244,6 +245,87 @@ test('publish 선택 — 상태가 그대로 전달되고 이미지는 생략할
     assert.equal(state.posts.length, 1);
     assert.equal(state.posts[0].status, 'publish');
     assert.equal(state.posts[0].featured_media, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test('wp-queue JSON — LLM 키 없이 JSON 만으로 올리고 JSON status 를 따른다', async () => {
+  const { server, port, state } = await startMockServer();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wp-queue-'));
+  const file = path.join(dir, '2026-11-20-queue-post.json');
+  const article = {
+    title: '큐로 올린 테스트 글',
+    slug: '2026-11-20 Queue Test',
+    excerpt: '큐 경로 테스트입니다.',
+    category: '할인정보',
+    tags: ['큐', '테스트'],
+    summary_points: ['첫째', '둘째', '셋째'],
+    content_html: '<p>' + '본문 문장입니다. '.repeat(40) + '</p><h2>소제목</h2><p>내용입니다.</p>',
+    fact_check_notes: ['가격은 공식 페이지에서 확인'],
+    needs_fact_check: true,
+    status: 'pending',
+  };
+  fs.writeFileSync(file, JSON.stringify(article), 'utf8');
+
+  try {
+    const run = await runPublisher(port, {
+      ARTICLE_JSON: file,
+      ANTHROPIC_API_KEY: '',
+      OPENAI_API_KEY: '',
+      TOPIC: '',
+      CATEGORY: '',
+      GENERATE_IMAGE: 'false',
+    });
+    assert.equal(run.code, 0, run.stderr + run.stdout);
+    assert.equal(state.llmCalls, 0, 'LLM 을 부르면 안 된다');
+    assert.equal(state.imageCalls, 0);
+    assert.equal(state.media.length, 0);
+
+    assert.equal(state.posts.length, 1);
+    const post = state.posts[0];
+    assert.equal(post.title, article.title);
+    assert.equal(post.status, 'pending', 'JSON 의 status 를 따라야 한다');
+    assert.equal(post.slug, '2026-11-20-queue-test');
+    assert.deepEqual(post.categories, [15]);
+    assert.ok(post.content.includes('3줄 요약'), post.content.slice(0, 200));
+    assert.ok(post.content.includes('<li>첫째</li>'));
+    assert.ok(post.content.includes('style="background:#f7f7f9'), '요약 박스에 스타일이 붙어야 한다');
+
+    const resultDir = fs.readFileSync(path.join(run.outDir, 'latest.txt'), 'utf8').trim();
+    const result = JSON.parse(fs.readFileSync(path.join(resultDir, 'result.json'), 'utf8'));
+    assert.equal(result.article.slug, '2026-11-20-queue-test');
+    assert.equal(result.postStatus.status, 'pending');
+    assert.equal(result.postStatus.source, 'JSON status');
+    assert.equal(result.article.factCheckNotes[0], '가격은 공식 페이지에서 확인');
+  } finally {
+    server.close();
+  }
+});
+
+test('wp-queue JSON — 워크플로우가 준 status 가 JSON 보다 우선한다', async () => {
+  const { server, port, state } = await startMockServer();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wp-queue-'));
+  const file = path.join(dir, 'publish-attempt.json');
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      title: '공개하려던 큐 글',
+      content_html: '<p>' + '본문 문장입니다. '.repeat(40) + '</p>',
+      status: 'publish',
+    }),
+    'utf8',
+  );
+
+  try {
+    const run = await runPublisher(port, {
+      ARTICLE_JSON: file,
+      POST_STATUS: 'draft',
+      GENERATE_IMAGE: 'false',
+    });
+    assert.equal(run.code, 0, run.stderr + run.stdout);
+    assert.equal(state.posts.length, 1);
+    assert.equal(state.posts[0].status, 'draft', 'POST_STATUS 가 이긴다');
   } finally {
     server.close();
   }

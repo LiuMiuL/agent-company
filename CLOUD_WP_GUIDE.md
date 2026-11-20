@@ -6,13 +6,14 @@ GitHub Actions 에서 **글을 만들고 `manyinfo.net` 워드프레스에 올�
 - 스크립트: `scripts/wp-publish.mjs` (의존성 없음 — `pnpm install` 없이 돕니다)
 - 워크플로우: `.github/workflows/wp-publish.yml` (이름: **WP Auto Publish**)
 - 기본 상태는 **`draft`(임시저장)** 입니다. 워드프레스 관리자에서 확인한 뒤 직접 발행하세요.
+- **LLM API 키 없이** 폰 클로드가 쓴 글을 올리는 길도 있습니다 → [0. API 키 없이 올리기](#0-api-키-없이-올리기--폰-클로드가-쓰는-wp-queue)
 
 ```
 [Run workflow]
-   topic · category · status · generate_image
+   topic · category · status · generate_image   (또는 article_json)
         │
         ▼
-  LLM 글 생성 (Anthropic 또는 OpenAI)
+  LLM 글 생성 (Anthropic 또는 OpenAI)  ← article_json 이면 생략, 키 불필요
         │  제목 · 요약 · HTML · 태그 · 이미지 프롬프트
         ▼
   HTML 정리 (허용 태그만 · script/이벤트 속성 제거)
@@ -26,6 +27,28 @@ GitHub Actions 에서 **글을 만들고 `manyinfo.net` 워드프레스에 올�
         ▼
   Actions Summary + 결과 JSON 아티팩트
 ```
+
+---
+
+## 0. API 키 없이 올리기 — 폰 클로드가 쓰는 `wp-queue`
+
+폰의 Claude 앱·Claude Code 가 **직접 쓴 글**을 JSON 으로 저장소에 커밋·푸시하면, 워크플로우가 그 파일만 골라
+워드프레스에 `draft` 로 올립니다. 이 경로는 **Anthropic·OpenAI 를 부르지 않으므로 LLM 키도, API 비용도 없습니다.**
+
+```
+폰 클로드 → wp-queue/2026-11-20-주제.json → commit & push (main)
+                                              │
+                                WP Auto Publish (push 트리거)
+                                              │  이번 푸시에서 추가·수정된 JSON 만
+                                              ▼
+                                   /wp/v2/posts → draft
+```
+
+- 필요한 Secret 은 `WP_USER` · `WP_APP_PASSWORD` **두 개뿐**입니다.
+- 파일 이름·JSON 스키마·카테고리 목록·폰 클로드에 붙여넣을 프롬프트: **[wp-queue/README.md](./wp-queue/README.md)**
+- 한 파일 = 한 글입니다. 이미 올린 파일을 고쳐 다시 푸시하면 **새 글이 하나 더 생깁니다**(수정이 아님).
+- 하위 폴더(`wp-queue/examples/…`)는 대상이 아닙니다. 예시 파일을 그대로 둘 수 있습니다.
+- `status` 를 비우면 `draft`. `publish` 는 JSON 에 직접 적거나 실행 화면에서 고를 때만 일어납니다.
 
 ---
 
@@ -49,10 +72,11 @@ GitHub Actions 에서 **글을 만들고 `manyinfo.net` 워드프레스에 올�
 | --- | --- | --- |
 | `WP_USER` | ✅ | 워드프레스 아이디 (`admin`) |
 | `WP_APP_PASSWORD` | ✅ | 1-1 에서 발급한 응용 프로그램 비밀번호 (공백 포함 그대로) |
-| `ANTHROPIC_API_KEY` | 택1 | Anthropic API 키 |
-| `OPENAI_API_KEY` | 택1 | OpenAI API 키 — **대문 이미지도 이 키로 만듭니다** |
+| `ANTHROPIC_API_KEY` | 선택 | Anthropic API 키 — `topic` 으로 새 글을 만들 때만 필요 |
+| `OPENAI_API_KEY` | 선택 | OpenAI API 키 — `topic` 모드, 그리고 대문 이미지 생성에 씁니다 |
 
-> LLM 키는 둘 중 **하나만** 있어도 됩니다. 둘 다 있으면 `LLM_PROVIDER=auto` 가
+> **`wp-queue` 경로(폰 클로드가 쓴 글)는 LLM 키가 필요 없습니다.** 위 두 개만 넣으면 됩니다.
+> LLM 키는 `topic` 으로 글을 생성할 때만 씁니다. 둘 다 있으면 `LLM_PROVIDER=auto` 가
 > Anthropic 을 먼저 씁니다. 이미지까지 원하면 `OPENAI_API_KEY` 도 넣으세요.
 
 ### 1-3. (선택) Variables
@@ -79,11 +103,14 @@ GitHub Actions 에서 **글을 만들고 `manyinfo.net` 워드프레스에 올�
 
 | 입력 | 설명 |
 | --- | --- |
-| **topic** (필수) | 글 주제. 예: `11월 말에 챙기면 좋은 생활 혜택` |
-| **category** | 목록에서 고르거나, `지정 안 함 (기본 카테고리)` 선택 |
-| **status** | `draft`(기본) 또는 `publish` — `publish` 는 **바로 공개**됩니다 |
-| **generate_image** | 대문 이미지 생성 여부 (기본 `true`, `OPENAI_API_KEY` 필요) |
+| **topic** (선택) | 글 주제. 예: `11월 말에 챙기면 좋은 생활 혜택`. `article_json` 을 넣으면 무시됩니다. |
+| **article_json** (선택) | 이미 쓴 글 JSON 경로. 예: `wp-queue/2026-11-20-주제.json`. 넣으면 LLM 을 부르지 않습니다(키 불필요). |
+| **category** | 목록에서 고르거나, `지정 안 함 (JSON·기본값)` 선택 — JSON 에 `category` 가 있으면 그 값을 씁니다. |
+| **status** | `auto`(기본 — JSON 의 status, 없으면 `draft`), `draft`, `publish`(바로 공개), `pending`, `private` |
+| **generate_image** | 대문 이미지 생성 여부 (기본 `false`, `OPENAI_API_KEY` 필요) |
 | **dry_run** | `true` 면 워드프레스에 **아무것도 쓰지 않고** 결과만 확인 |
+
+> `topic` 과 `article_json` 중 **하나는 있어야** 합니다. 둘 다 비우면 워크플로우가 이유를 남기고 멈춥니다.
 
 끝나면 **Summary** 화면에 제목·글 ID·카테고리·이미지·확인이 필요한 항목이 나옵니다.
 `draft` 글로 바로 가는 링크도 함께 표시됩니다. (`/wp-admin/post.php?post=<ID>&action=edit`)
@@ -122,6 +149,17 @@ node scripts/wp-publish.mjs
 ---
 
 ## 4. 동작 세부
+
+### 업로드 상태 (`draft` 가 기본)
+
+정하는 순서는 이렇습니다.
+
+1. **`POST_STATUS`** — 실행 화면의 `status` 입력이나 환경변수. 사람이 고른 값이 가장 셉니다. `auto` 는 "정하지 않음"과 같습니다.
+2. **`ARTICLE_JSON` 의 `status`** — 큐 파일에 적힌 값.
+3. 둘 다 없으면 **`draft`**.
+
+JSON 의 status 가 이상한 값이면(예: `public`) 멈추지 않고 `draft` 로 올리며 Summary 에 경고를 남깁니다.
+Summary 의 `상태: draft (JSON status)` 처럼 어디서 온 값인지 함께 표시됩니다.
 
 ### 카테고리
 
@@ -182,7 +220,9 @@ schedule:
 | `404 rest_no_route` | 보안 플러그인이 REST 를 막았거나 주소가 다름. `https://manyinfo.net/wp-json/wp/v2/posts` 가 열리는지 확인 |
 | 카테고리를 못 찾음 | Summary 의 사용 가능 목록 확인. 또는 ID 로 입력 |
 | `LLM 응답에서 JSON 을 찾지 못했습니다` | 모델이 형식을 어김. 다시 실행하거나 `OPENAI_MODEL`/`ANTHROPIC_MODEL` 변경 |
-| 이미지가 없음 | `OPENAI_API_KEY` 없는 경우가 대부분. Summary 의 이유 확인 |
+| 이미지가 없음 | `OPENAI_API_KEY` 가 없거나 `generate_image` 가 꺼져 있는 경우가 대부분. Summary 의 이유 확인 |
+| 푸시했는데 실행이 안 됨 | 파일이 `wp-queue/` **바로 아래** `.json` 인지, `main` 에 푸시했는지 확인. 하위 폴더·다른 확장자는 대상이 아님 |
+| `article_json … 파일이 없습니다` | 경로는 저장소 루트 기준. 대소문자·확장자까지 맞출 것 |
 | 워크플로우가 안 보임 | Actions 탭에서 워크플로우 파일이 `main` 에 있는지 확인 (머지 전 브랜치면 안 보임) |
 
 ---

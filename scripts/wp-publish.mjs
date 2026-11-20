@@ -10,18 +10,22 @@
  *
  * ── 하는 일 ────────────────────────────────────────────────────────────────
  *   1. TOPIC 으로 LLM(Anthropic 또는 OpenAI)에 글을 요청한다 (JSON 응답).
+ *      ARTICLE_JSON=<경로> 를 주면 LLM 을 부르지 않고 그 파일을 쓴다 — 폰 클로드가
+ *      쓴 글을 wp-queue/ 에 커밋하면 GitHub Actions 가 이 경로로 올린다(키 불필요).
  *   2. 받은 HTML 을 정리한다 — 허용 태그만 남기고 스크립트·이벤트 속성을 버린다.
  *   3. CATEGORY 를 워드프레스 카테고리와 매칭한다 (이름·슬러그·ID).
  *   4. (선택) OpenAI Images 로 대문 이미지를 만들어 /wp/v2/media 에 올리고 featured_media 로 연결한다.
  *   5. /wp/v2/posts 에 글을 만든다. 기본값은 `draft`(임시저장)다.
+ *      상태 우선순위: POST_STATUS > ARTICLE_JSON 의 status > draft.
  *
  * ── 안전 원칙 ──────────────────────────────────────────────────────────────
  *   · 비밀값은 환경변수에서만 읽는다. 하드코딩·로그 출력·파일 기록 금지.
  *   · DRY_RUN=true 면 워드프레스에 **아무것도 쓰지 않는다** (읽기만).
- *   · 발행(publish)은 사람이 워크플로우 입력에서 명시적으로 고를 때만 일어난다.
+ *   · 발행(publish)은 사람이 워크플로우 입력이나 JSON 에 명시할 때만 일어난다.
  *
  * 사용:
  *   node scripts/wp-publish.mjs
+ *   ARTICLE_JSON=wp-queue/2026-11-20-slug.json node scripts/wp-publish.mjs   # LLM 키 불필요
  *   DRY_RUN=true ARTICLE_JSON=scripts/fixtures/wp-article-sample.json \
  *     TOPIC="예시 주제" node scripts/wp-publish.mjs
  */
@@ -39,6 +43,25 @@ const warn = (...args) => console.warn(LOG_PREFIX, '주의:', ...args);
 
 const DEFAULT_WP_URL = 'https://manyinfo.net';
 const DEFAULT_CATEGORY_FALLBACK = '일상·잡담';
+const ALLOWED_POST_STATUSES = ['draft', 'publish', 'pending', 'private'];
+
+// ARTICLE_JSON 에서 읽는 필드. 여기 없는 키는 오타일 수 있어 경고만 남기고 무시한다.
+const KNOWN_ARTICLE_KEYS = new Set([
+  'title',
+  'slug',
+  'excerpt',
+  'category',
+  'tags',
+  'content_html',
+  'html',
+  'content',
+  'summary_points',
+  'fact_check_notes',
+  'needs_fact_check',
+  'image_prompt',
+  'image_alt',
+  'status',
+]);
 const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const DEFAULT_IMAGE_MODEL = 'gpt-image-1';
@@ -66,11 +89,14 @@ export function readConfig(env = process.env) {
   const e = (name, fallback = '') => envStr(name, fallback, env);
   const b = (name, fallback) => envBool(name, fallback, env);
   const wpUrl = (e('WP_URL', DEFAULT_WP_URL) || DEFAULT_WP_URL).replace(/\/+$/, '');
-  const postStatus = e('POST_STATUS', 'draft').toLowerCase();
-  const allowedStatuses = ['draft', 'publish', 'pending', 'private'];
-  if (!allowedStatuses.includes(postStatus)) {
-    throw new Error(`POST_STATUS="${postStatus}" 는 쓸 수 없습니다. 허용: ${allowedStatuses.join(', ')}`);
+  // POST_STATUS 가 비었거나 'auto' 면 ARTICLE_JSON 의 status 를 따르고,
+  // 그것도 없으면 가장 안전한 기본값 draft 로 올린다.
+  const rawStatus = e('POST_STATUS', '').toLowerCase();
+  const statusAuto = !rawStatus || rawStatus === 'auto';
+  if (!statusAuto && !ALLOWED_POST_STATUSES.includes(rawStatus)) {
+    throw new Error(`POST_STATUS="${rawStatus}" 는 쓸 수 없습니다. 허용: ${ALLOWED_POST_STATUSES.join(', ')}, auto`);
   }
+  const postStatus = statusAuto ? 'draft' : rawStatus;
 
   const provider = e('LLM_PROVIDER', 'auto').toLowerCase();
   if (!['auto', 'anthropic', 'openai'].includes(provider)) {
@@ -95,6 +121,7 @@ export function readConfig(env = process.env) {
     categoryFallback: e('CATEGORY_FALLBACK', DEFAULT_CATEGORY_FALLBACK),
     strictCategory: b('STRICT_CATEGORY', false),
     postStatus,
+    postStatusExplicit: !statusAuto,
     generateImage: b('GENERATE_IMAGE', true),
     imageModel: e('IMAGE_MODEL', DEFAULT_IMAGE_MODEL),
     dryRun: b('DRY_RUN', false),
@@ -108,6 +135,26 @@ export function readConfig(env = process.env) {
   };
   cfg.outputDir = path.isAbsolute(cfg.outputDir) ? cfg.outputDir : path.join(ROOT, cfg.outputDir);
   return cfg;
+}
+
+/**
+ * 업로드 상태를 정한다.
+ *   1) POST_STATUS (워크플로우 입력·환경변수) 가 있으면 그 값을 그대로 따른다 — 사람이 고른 값.
+ *   2) 없으면 ARTICLE_JSON 의 status.
+ *   3) 둘 다 없거나 읽을 수 없으면 draft (임시저장).
+ * `auto` 는 "환경변수로 정하지 않음"과 같은 뜻이다.
+ */
+export function resolvePostStatus(cfg, parsed = {}) {
+  if (cfg?.postStatusExplicit) return { status: cfg.postStatus, source: 'POST_STATUS' };
+
+  const raw = String(parsed?.status ?? '').trim().toLowerCase();
+  if (!raw || raw === 'auto') return { status: 'draft', source: '기본값(draft)' };
+  if (ALLOWED_POST_STATUSES.includes(raw)) return { status: raw, source: 'JSON status' };
+  return {
+    status: 'draft',
+    source: '기본값(draft)',
+    warning: `JSON 의 status="${raw}" 는 쓸 수 없어 draft 로 올립니다. 허용: ${ALLOWED_POST_STATUSES.join(', ')}`,
+  };
 }
 
 function resolveProvider(cfg) {
@@ -532,6 +579,26 @@ export function extractJson(text) {
   return null;
 }
 
+/** 워드프레스 슬러그로 쓸 수 있게 다듬는다. 한글은 그대로 둔다(WP가 URL 인코딩한다). */
+export function normalizeSlug(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_/]+/g, '-')
+    .replace(/[^\p{L}\p{N}-]+/gu, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 180);
+}
+
+/** JSON 의 summary_points 로 3줄 요약 박스를 만든다(본문에 이미 있으면 쓰지 않는다). */
+function buildSummaryBox(points) {
+  const heading = points.length === 3 ? '3줄 요약' : '핵심 요약';
+  const items = points.map((p) => `<li>${escapeHtmlText(p)}</li>`).join('');
+  return `<div class="summary-box"><p><strong>${heading}</strong></p><ul>${items}</ul></div>`;
+}
+
 export function normalizeArticle(parsed, { topic, category }) {
   const issues = [];
   let title = String(parsed?.title ?? '').trim();
@@ -544,10 +611,19 @@ export function normalizeArticle(parsed, { topic, category }) {
     issues.push('제목이 90자를 넘어 잘랐습니다.');
   }
 
-  const rawHtml = String(parsed?.html ?? parsed?.content ?? '').trim();
-  if (!rawHtml) throw new Error('LLM 응답에 html/content 가 없습니다.');
+  const rawHtml = String(parsed?.html ?? parsed?.content_html ?? parsed?.content ?? '').trim();
+  if (!rawHtml) throw new Error('글 본문이 없습니다. JSON 의 content_html(또는 html)을 채워 주세요.');
 
-  let html = decorateHtml(sanitizeHtml(coerceToHtml(rawHtml)));
+  const summaryPoints = Array.isArray(parsed?.summary_points)
+    ? parsed.summary_points.map((p) => String(p).trim()).filter(Boolean).slice(0, 5)
+    : [];
+
+  let sourceHtml = coerceToHtml(rawHtml);
+  if (summaryPoints.length && !/class\s*=\s*["'][^"']*summary-box/i.test(sourceHtml)) {
+    sourceHtml = `${buildSummaryBox(summaryPoints)}\n${sourceHtml}`;
+  }
+
+  let html = decorateHtml(sanitizeHtml(sourceHtml));
   if (!html) throw new Error('HTML 정리 후 본문이 비었습니다.');
 
   const textLength = stripTags(html).length;
@@ -563,6 +639,7 @@ export function normalizeArticle(parsed, { topic, category }) {
 
   const imagePrompt = String(parsed?.image_prompt ?? '').trim();
   const imageAlt = String(parsed?.image_alt ?? '').trim() || `${title} 대표 이미지`;
+  const slug = normalizeSlug(parsed?.slug);
   const needsFactCheck = parsed?.needs_fact_check === true;
   const factCheckNotes = Array.isArray(parsed?.fact_check_notes)
     ? parsed.fact_check_notes.map((n) => String(n).trim()).filter(Boolean)
@@ -572,6 +649,7 @@ export function normalizeArticle(parsed, { topic, category }) {
 
   return {
     title,
+    slug,
     excerpt,
     html,
     textLength,
@@ -743,8 +821,21 @@ async function generateArticle(cfg) {
   if (cfg.articleJson) {
     const file = path.isAbsolute(cfg.articleJson) ? cfg.articleJson : path.join(ROOT, cfg.articleJson);
     if (!fs.existsSync(file)) throw new Error(`ARTICLE_JSON 파일이 없습니다: ${file}`);
-    log(`LLM 호출 없이 ARTICLE_JSON 을 사용합니다: ${path.relative(ROOT, file)}`);
-    return { parsed: JSON.parse(fs.readFileSync(file, 'utf8')), meta: { source: 'article-json', file } };
+    const rel = path.relative(ROOT, file);
+    log(`LLM 호출 없이 ARTICLE_JSON 을 사용합니다: ${rel}`);
+    const raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`ARTICLE_JSON(${rel}) 을 JSON 으로 읽지 못했습니다: ${err.message}`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`ARTICLE_JSON(${rel}) 의 최상위는 객체({ })여야 합니다.`);
+    }
+    const unknown = Object.keys(parsed).filter((k) => !KNOWN_ARTICLE_KEYS.has(k));
+    if (unknown.length) warn(`ARTICLE_JSON(${rel}) 에서 모르는 필드는 무시합니다: ${unknown.join(', ')}`);
+    return { parsed, meta: { source: 'article-json', file: rel } };
   }
 
   if (!cfg.topic) throw new Error('TOPIC 이 필요합니다. (워크플로우 입력 topic)');
@@ -899,10 +990,10 @@ async function fetchCategories(cfg) {
   return all;
 }
 
-async function resolveCategory(cfg, categories) {
-  const requested = cfg.category;
+async function resolveCategory(cfg, categories, requestedQuery = cfg.category) {
+  const requested = String(requestedQuery ?? '').trim();
   if (!requested) {
-    log('카테고리 지정이 없어 워드프레스 기본 카테고리를 씁니다.');
+    log('카테고리 지정이 없어 워드프레스 카테고리를 기본값으로 둡니다.');
     return { requested: '', category: null, fallback: false };
   }
   const match = matchCategory(categories, requested);
@@ -1068,12 +1159,13 @@ function writeOutputs(dir, payload) {
 }
 
 function buildSummary(payload) {
-  const { dryRun, article, category, post, image, warnings, run } = payload;
+  const { dryRun, article, category, post, image, warnings, run, postStatus } = payload;
   const lines = [];
   lines.push(dryRun ? '## 워드프레스 자동 발행 — DRY RUN (업로드 안 함)' : '## 워드프레스 자동 발행 결과');
   lines.push('');
   lines.push(`- **제목**: ${article.title}`);
-  lines.push(`- **상태**: ${dryRun ? 'dry-run' : post?.status || '알 수 없음'}`);
+  if (article.slug) lines.push(`- **슬러그**: ${article.slug}`);
+  lines.push(`- **상태**: ${dryRun ? 'dry-run' : `${post?.status || '알 수 없음'}${postStatus?.source ? ` (${postStatus.source})` : ''}`}`);
   if (post?.id) {
     const edit = `${run.siteUrl}/wp-admin/post.php?post=${post.id}&action=edit`;
     lines.push(`- **글 ID**: ${post.id} · [워드프레스에서 열기](${edit})`);
@@ -1149,18 +1241,25 @@ export async function run() {
 
   // 1) 글
   const { parsed, meta } = await generateArticle(cfg);
-  const article = normalizeArticle(parsed, { topic: cfg.topic, category: cfg.category });
+  // 카테고리는 워크플로우 입력(환경변수)이 우선, 없으면 JSON 의 category.
+  const requestedCategory = cfg.category || String(parsed?.category ?? '').trim();
+  const article = normalizeArticle(parsed, { topic: cfg.topic, category: requestedCategory });
   log(`본문 ${article.textLength}자 · 태그 ${article.tags.length}개`);
+
+  // 업로드 상태 — 사람이 고른 POST_STATUS > JSON status > draft.
+  const statusInfo = resolvePostStatus(cfg, parsed);
+  if (statusInfo.warning) warnings.push(statusInfo.warning);
+  log(`업로드 상태: ${statusInfo.status} (${statusInfo.source})`);
 
   // 2) 카테고리 (읽기 — DRY_RUN 에서도 가능. 자격증명이 없으면 건너뛴다)
   let categories = [];
-  let category = { requested: cfg.category, category: null, fallback: false };
+  let category = { requested: requestedCategory, category: null, fallback: false };
   const canReadWp = Boolean(cfg.wpUser && cfg.wpAppPassword) || cfg.dryRun;
   if (canReadWp && cfg.wpUrl) {
     try {
       categories = await fetchCategories(cfg);
       log(`카테고리 ${categories.length}개 조회`);
-      category = await resolveCategory(cfg, categories);
+      category = await resolveCategory(cfg, categories, requestedCategory);
     } catch (err) {
       if (cfg.dryRun && !cfg.strictCategory) {
         warn(`카테고리 조회 실패(무시하고 계속): ${err.message}`);
@@ -1214,14 +1313,15 @@ export async function run() {
       title: article.title,
       content: article.html,
       excerpt: article.excerpt,
-      status: cfg.postStatus,
+      status: statusInfo.status,
       format: 'standard',
     };
+    if (article.slug) postBody.slug = article.slug;
     if (category.category?.id) postBody.categories = [category.category.id];
     if (tagIds.length) postBody.tags = tagIds;
     if (image.uploaded?.id) postBody.featured_media = image.uploaded.id;
 
-    log(`글 업로드: status=${cfg.postStatus}`);
+    log(`글 업로드: status=${statusInfo.status}`);
     const created = await wpRequest(cfg, 'POST', '/posts', { json: postBody, retries: 0 });
     post = {
       id: created.data?.id,
@@ -1239,6 +1339,7 @@ export async function run() {
     run: { siteUrl, outputDir: path.relative(ROOT, runDir), meta },
     article: {
       title: article.title,
+      slug: article.slug,
       excerpt: article.excerpt,
       html: article.html,
       htmlLength: article.html.length,
@@ -1257,6 +1358,7 @@ export async function run() {
     },
     image,
     post,
+    postStatus: { status: statusInfo.status, source: statusInfo.source },
     warnings,
   };
 

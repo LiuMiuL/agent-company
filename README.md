@@ -274,7 +274,8 @@ PC 가 꺼져 있어도 글을 만들어 워드프레스(`manyinfo.net`)에 임�
 
 - 스크립트: `scripts/wp-publish.mjs` — LLM 글 생성 → HTML 정리 → 카테고리 매칭 → (선택) 대문 이미지 → `draft`
 - 워크플로우: `.github/workflows/wp-publish.yml` (**WP Auto Publish**)
-- 기본값은 `draft`. `publish` 는 사람이 실행 화면에서 고를 때만 일어납니다.
+- **API 키 없이** 올리는 길: 폰 클로드가 쓴 `wp-queue/<날짜>-<슬러그>.json` 을 푸시하면 이번 푸시에서 바뀐 JSON 만 `draft` 로 올라갑니다 ([wp-queue/README.md](./wp-queue/README.md))
+- 기본값은 `draft`. `publish` 는 사람이 실행 화면에서 고르거나 JSON 에 적을 때만 일어납니다.
 - 설정·실행법: [CLOUD_WP_GUIDE.md](./CLOUD_WP_GUIDE.md)
 - 경계와 이유: [ADR-0004](./wiki/decisions/ADR-0004-cloud-wordpress-publishing.md)
 
@@ -314,7 +315,7 @@ PC 가 꺼져 있어도 글을 만들어 워드프레스(`manyinfo.net`)에 임�
 | `pnpm context` | 세션 컨텍스트 수동 출력 |
 | `pnpm memory:new <topic>` | 새 메모리 파일 생성 (`--long` 으로 장기) |
 | `pnpm dev \| build \| typecheck \| lint \| test` | 워크스페이스 전체 (turbo) |
-| `pnpm wp:publish` · `pnpm wp:test` | 클라우드 워드프레스 발행(기본 `draft`) · 발행 스크립트 테스트 — [안내](./CLOUD_WP_GUIDE.md) |
+| `pnpm wp:publish` · `pnpm wp:test` | 클라우드 워드프레스 발행(기본 `draft`) · 발행 스크립트 테스트 — [안내](./CLOUD_WP_GUIDE.md) · [큐](./wp-queue/README.md) |
 
 ### 템플릿이 얹는 것
 

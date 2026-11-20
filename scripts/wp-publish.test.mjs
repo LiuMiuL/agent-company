@@ -14,10 +14,12 @@ import {
   decorateHtml,
   extractJson,
   normalizeArticle,
+  normalizeSlug,
   matchCategory,
   normalizeCategoryName,
   deriveExcerpt,
   readConfig,
+  resolvePostStatus,
 } from './wp-publish.mjs';
 
 const CATEGORIES = [
@@ -158,6 +160,70 @@ test('readConfig — 기본값은 draft 이고 잘못된 상태는 거부한다'
   const cfg = readConfig({});
   assert.equal(cfg.wpUrl, 'https://manyinfo.net');
   assert.equal(cfg.postStatus, 'draft');
+  assert.equal(cfg.postStatusExplicit, false);
   assert.equal(cfg.categoryFallback, '일상·잡담');
   assert.throws(() => readConfig({ POST_STATUS: 'public' }), /POST_STATUS/);
+});
+
+test('readConfig — POST_STATUS=auto 는 "환경변수로 안 정함"으로 읽는다', () => {
+  const auto = readConfig({ POST_STATUS: 'auto' });
+  assert.equal(auto.postStatus, 'draft');
+  assert.equal(auto.postStatusExplicit, false);
+
+  const explicit = readConfig({ POST_STATUS: 'PUBLISH' });
+  assert.equal(explicit.postStatus, 'publish');
+  assert.equal(explicit.postStatusExplicit, true);
+});
+
+test('resolvePostStatus — POST_STATUS > JSON status > draft 순서다', () => {
+  const explicit = readConfig({ POST_STATUS: 'pending' });
+  assert.deepEqual(resolvePostStatus(explicit, { status: 'publish' }), { status: 'pending', source: 'POST_STATUS' });
+
+  const auto = readConfig({});
+  assert.deepEqual(resolvePostStatus(auto, { status: 'draft' }), { status: 'draft', source: 'JSON status' });
+  assert.equal(resolvePostStatus(auto, { status: 'PUBLISH' }).status, 'publish');
+  assert.equal(resolvePostStatus(auto, {}).status, 'draft');
+  assert.equal(resolvePostStatus(auto, { status: 'auto' }).status, 'draft');
+
+  const invalid = resolvePostStatus(auto, { status: 'public' });
+  assert.equal(invalid.status, 'draft');
+  assert.ok(invalid.warning.includes('public'), invalid.warning);
+});
+
+test('normalizeSlug — 공백·대문자·특수문자를 정리하고 한글은 남긴다', () => {
+  assert.equal(normalizeSlug('  My Post / Title! '), 'my-post-title');
+  assert.equal(normalizeSlug('2026-11-20 할인_정리'), '2026-11-20-할인-정리');
+  assert.equal(normalizeSlug('---'), '');
+  assert.equal(normalizeSlug(undefined), '');
+});
+
+test('normalizeArticle — content_html·summary_points·slug·category 를 받는다', () => {
+  const article = normalizeArticle(
+    {
+      title: '큐 글로 올린 글',
+      slug: 'queue-post',
+      category: '할인정보',
+      content_html: '<p>' + '본문 문장입니다. '.repeat(60) + '</p>',
+      summary_points: ['하나', '둘', '셋'],
+    },
+    { topic: '', category: '할인정보' },
+  );
+  assert.equal(article.slug, 'queue-post');
+  assert.equal(article.category, '할인정보');
+  assert.ok(article.html.includes('3줄 요약'), article.html.slice(0, 120));
+  assert.ok(article.html.includes('<li>하나</li>'), article.html.slice(0, 200));
+  assert.ok(article.html.includes('style="background:#f7f7f9'), '요약 박스에 스타일이 붙어야 한다');
+});
+
+test('normalizeArticle — 본문에 요약 박스가 있으면 summary_points 로 또 만들지 않는다', () => {
+  const article = normalizeArticle(
+    {
+      title: '요약 박스가 있는 글',
+      content_html: '<div class="summary-box"><p>이미 요약</p></div><p>' + '본문입니다. '.repeat(60) + '</p>',
+      summary_points: ['하나', '둘', '셋'],
+    },
+    { topic: '', category: '' },
+  );
+  assert.equal((article.html.match(/summary-box/g) || []).length, 1);
+  assert.ok(!article.html.includes('3줄 요약'));
 });
